@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: flexitime_test
+      POSTGRES_USER: flexitime
+      POSTGRES_PASSWORD: flexitime_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flexitime -d flexitime_test"]
+      interval: 1s
+      timeout: 2s
+      retries: 30

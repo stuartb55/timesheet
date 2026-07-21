@@ -1,0 +1,95 @@
+/* GOV.UK Frontend supplies typography, forms, buttons, tables and focus styles.
+   This file contains only layouts specific to the flexitime application. */
+
+.govuk-template__body {
+  font-family: "GDS Transport", arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.app-card {
+  border: 1px solid #b1b4b6;
+  padding: 20px;
+  background: #fff;
+}
+
+.app-card__value {
+  display: block;
+  margin-top: 5px;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.app-card__label {
+  color: #505a5f;
+}
+
+.app-date-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: end;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.app-calendar-grid {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 760px;
+}
+
+.app-calendar-day {
+  min-height: 110px;
+  border: 1px solid #b1b4b6;
+  padding: 10px;
+}
+
+.app-calendar-day--outside {
+  background: #f3f2f1;
+  color: #505a5f;
+}
+
+.app-table-scroll {
+  overflow-x: auto;
+}
+
+.app-nowrap {
+  white-space: nowrap;
+}
+
+.app-pre-wrap {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.app-print-only {
+  display: none;
+}
+
+@media print {
+  .govuk-generic-header,
+  .govuk-service-navigation,
+  .govuk-footer,
+  .app-no-print,
+  .govuk-button {
+    display: none !important;
+  }
+
+  .govuk-width-container {
+    max-width: none;
+    margin: 0;
+  }
+
+  .app-print-only {
+    display: block;
+  }
+}

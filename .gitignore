@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+coverage/
+playwright-report/
+test-results/
+backups/*
+!backups/.gitkeep
+public/assets/

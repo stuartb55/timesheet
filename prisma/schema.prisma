@@ -1,0 +1,298 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum PolicyProfile {
+  STANDARD_CORPORATE
+  SERVICE_SUPPORT
+  VOICE_CONTACT_CENTRE
+}
+
+enum DefaultEntryMethod {
+  LIVE_CLOCK
+  MANUAL
+}
+
+enum PeriodStatus {
+  OPEN
+  COMPLETE
+  CHECKED
+  LOCKED
+}
+
+enum SegmentType {
+  NORMAL_WORK
+  OFFICIAL_TRAVEL
+  OVERTIME
+  ROTA_BOOT_UP
+  LUNCH_BREAK
+  OTHER_UNPAID_BREAK
+}
+
+enum ApprovalStatus {
+  NOT_REQUIRED
+  PENDING
+  APPROVED
+  REFUSED
+}
+
+enum CreditType {
+  ANNUAL_LEAVE
+  SICK_ABSENCE
+  PUBLIC_HOLIDAY
+  PRIVILEGE_DAY
+  TRAINING
+  TRADE_UNION_FACILITY_TIME
+  MEDICAL_APPOINTMENT
+  DOCTOR
+  DENTIST
+  HOSPITAL
+  OPTICIAN
+  PRE_NATAL_APPOINTMENT
+  OFFICIAL_TRAVEL
+  SIGNIFICANT_TRANSPORT_DISRUPTION
+  OTHER_AUTHORISED_ABSENCE
+}
+
+enum FlexiLeaveKind {
+  FULL_DAY
+  HALF_DAY
+  PARTIAL
+}
+
+enum LedgerEntryType {
+  OPENING_BALANCE
+  DAILY_WORK_BALANCE
+  AUTHORISED_CREDIT
+  FLEXI_LEAVE
+  CARRYOVER_ADJUSTMENT
+  CREDIT_LOST
+  EXCEPTIONAL_CARRYOVER
+  MANUAL_CORRECTION
+}
+
+enum HistoryAction {
+  CREATED
+  UPDATED
+  DELETED
+  RESTORED
+  LOCKED
+  UNLOCKED
+  IMPORTED
+}
+
+model PersonalSettings {
+  id                       Int                @id @default(1)
+  name                     String?
+  weeklyConditionedMinutes Int
+  standardDayMinutes       Int
+  accountingAnchorDate     DateTime           @db.Date
+  warningThresholdMinutes  Int                @default(2700)
+  defaultEntryMethod       DefaultEntryMethod @default(LIVE_CLOCK)
+  dateFormat               String             @default("dd/MM/yyyy")
+  timeFormat               String             @default("24h")
+  workingPatternId         String             @unique
+  flexitimePolicyId        String             @unique
+  setupComplete            Boolean            @default(false)
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  workingPattern           WorkingPattern     @relation(fields: [workingPatternId], references: [id])
+  flexitimePolicy          FlexitimePolicy    @relation(fields: [flexitimePolicyId], references: [id])
+}
+
+model WorkingPattern {
+  id        String              @id @default(cuid())
+  name      String              @default("Current working pattern")
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  settings  PersonalSettings?
+  days      WorkingPatternDay[]
+}
+
+model WorkingPatternDay {
+  id               String         @id @default(cuid())
+  workingPatternId String
+  weekday          Int
+  isWorkingDay     Boolean        @default(true)
+  expectedMinutes  Int            @default(0)
+  workingPattern   WorkingPattern @relation(fields: [workingPatternId], references: [id], onDelete: Cascade)
+
+  @@unique([workingPatternId, weekday])
+}
+
+model FlexitimePolicy {
+  id                        String            @id @default(cuid())
+  profile                   PolicyProfile
+  startBandwidthMinutes     Int
+  morningCoreStartMinutes   Int
+  morningCoreEndMinutes     Int
+  lunchStartMinutes         Int
+  lunchEndMinutes           Int
+  afternoonCoreStartMinutes Int
+  afternoonCoreEndMinutes   Int
+  finishBandwidthMinutes    Int
+  rotaMode                  Boolean           @default(false)
+  bootUpAllowanceMinutes    Int               @default(0)
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+  settings                  PersonalSettings?
+}
+
+model AccountingPeriod {
+  id                    String                 @id @default(cuid())
+  startDate             DateTime               @unique @db.Date
+  endDate               DateTime               @db.Date
+  openingBalanceMinutes Int                    @default(0)
+  finalCarryoverMinutes Int?
+  carryoverConfirmed    Boolean                @default(false)
+  status                PeriodStatus           @default(OPEN)
+  checkedAt             DateTime?
+  lockedAt              DateTime?
+  unlockReason          String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  exceptionalCarryovers ExceptionalCarryover[]
+  ledgerEntries         BalanceLedgerEntry[]
+
+  @@index([startDate, endDate])
+  @@index([status])
+}
+
+model TimeSegment {
+  id                        String         @id @default(cuid())
+  localDate                 DateTime       @db.Date
+  startAt                   DateTime
+  endAt                     DateTime?
+  type                      SegmentType
+  note                      String?
+  approvalStatus            ApprovalStatus @default(NOT_REQUIRED)
+  approvalDate              DateTime?      @db.Date
+  approvalNote              String?
+  officialTravelConfirmed   Boolean        @default(false)
+  agreedNormalFinishMinutes Int?
+  scheduledStartMinutes     Int?
+  deletedAt                 DateTime?
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+
+  @@index([localDate])
+  @@index([startAt, endAt])
+  @@index([endAt])
+  @@index([approvalStatus])
+  @@index([deletedAt])
+}
+
+model AuthorisedCredit {
+  id              String         @id @default(cuid())
+  localDate       DateTime       @db.Date
+  durationMinutes Int
+  startAt         DateTime?
+  endAt           DateTime?
+  type            CreditType
+  note            String?
+  approvalStatus  ApprovalStatus @default(NOT_REQUIRED)
+  approvalDate    DateTime?      @db.Date
+  approvalNote    String?
+  deletedAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([localDate])
+  @@index([approvalStatus])
+  @@index([deletedAt])
+}
+
+model FlexiLeave {
+  id              String         @id @default(cuid())
+  localDate       DateTime       @db.Date
+  durationMinutes Int
+  kind            FlexiLeaveKind
+  note            String?
+  approvalStatus  ApprovalStatus @default(PENDING)
+  approvalDate    DateTime?      @db.Date
+  deletedAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([localDate])
+  @@index([approvalStatus])
+  @@index([deletedAt])
+}
+
+model ExceptionalCarryover {
+  id                    String           @id @default(cuid())
+  accountingPeriodId    String
+  approvedAmountMinutes Int
+  approvalDate          DateTime         @db.Date
+  note                  String
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  accountingPeriod      AccountingPeriod @relation(fields: [accountingPeriodId], references: [id], onDelete: Cascade)
+
+  @@index([accountingPeriodId])
+}
+
+model DailyCompletion {
+  id                 String    @id @default(cuid())
+  localDate          DateTime  @unique @db.Date
+  completedAt        DateTime  @default(now())
+  lastChangedAfterAt DateTime?
+}
+
+model BalanceLedgerEntry {
+  id                 String           @id @default(cuid())
+  localDate          DateTime         @db.Date
+  accountingPeriodId String
+  type               LedgerEntryType
+  durationMinutes    Int
+  sourceType         String?
+  sourceId           String?
+  description        String
+  provisional        Boolean          @default(false)
+  reason             String?
+  createdAt          DateTime         @default(now())
+  accountingPeriod   AccountingPeriod @relation(fields: [accountingPeriodId], references: [id], onDelete: Cascade)
+
+  @@index([localDate])
+  @@index([accountingPeriodId])
+  @@index([sourceType, sourceId])
+  @@index([provisional])
+}
+
+model FindingResolution {
+  id             String         @id @default(cuid())
+  localDate      DateTime       @db.Date
+  ruleId         String
+  approvalStatus ApprovalStatus
+  note           String?
+  approvalDate   DateTime?      @db.Date
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([localDate, ruleId])
+  @@index([approvalStatus])
+}
+
+model ChangeHistory {
+  id             String        @id @default(cuid())
+  occurredAt     DateTime      @default(now())
+  recordType     String
+  recordId       String
+  action         HistoryAction
+  previousValues Json?
+  newValues      Json?
+  reason         String?
+
+  @@index([occurredAt])
+  @@index([recordType, recordId])
+}
+
+model ApplicationSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}

@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: flexitime
+      POSTGRES_USER: flexitime
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-flexitime-only}
+    volumes:
+      - flexitime_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flexitime -d flexitime"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  web:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://flexitime:${POSTGRES_PASSWORD:-local-flexitime-only}@db:5432/flexitime?schema=public
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "127.0.0.1:${LOCAL_PORT:-3000}:3000"
+    volumes:
+      - ./backups:/app/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  flexitime_postgres_data:

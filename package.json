@@ -1,0 +1,59 @@
+{
+  "name": "personal-flexitime-record",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "predev": "node scripts/copy-govuk-assets.mjs",
+    "dev": "next dev",
+    "prebuild": "node scripts/copy-govuk-assets.mjs",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run src/domain",
+    "test:component": "vitest run src/components",
+    "test:e2e": "playwright test",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:reset": "bash scripts/reset-database.sh",
+    "data:export": "tsx scripts/export-data.ts",
+    "data:import": "tsx scripts/import-data.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.9.0",
+    "@prisma/client": "7.9.0",
+    "dotenv": "17.4.2",
+    "govuk-frontend": "6.4.0",
+    "next": "16.2.11",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@testing-library/jest-dom": "7.0.0",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.2.11",
+    "jsdom": "29.1.1",
+    "prettier": "3.9.6",
+    "prisma": "7.9.0",
+    "sass": "1.101.3",
+    "tsx": "4.23.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  },
+  "overrides": {
+    "esbuild": "0.28.1",
+    "postcss": "8.5.10"
+  }
+}
