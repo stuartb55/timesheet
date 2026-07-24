@@ -8,7 +8,12 @@ Service Support uses 08:00 as its earliest start and 18:30 as its latest finish.
 
 ## Daily calculation
 
-Confirmed eligible minutes are normal work, confirmed official travel, confirmed/no-approval-required authorised credits and eligible rota boot-up. Rota boot-up must be externally approved, end at the recorded scheduled start and is capped at the configured allowance. Pending credits are added only to the provisional result. Lunch, unpaid breaks, paid overtime, refused credits and absence without credit are excluded.
+Confirmed eligible minutes are normal work, confirmed official travel,
+confirmed/no-approval-required authorised credits and eligible rota boot-up.
+Rota boot-up must be externally approved, end at the recorded scheduled start
+and is capped across the whole day at the configured allowance. Pending credits
+are added only to the provisional result. Lunch, unpaid breaks, paid overtime,
+refused credits and absence without credit are excluded.
 
 `daily balance change = eligible minutes − expected minutes for the calendar date`
 

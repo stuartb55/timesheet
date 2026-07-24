@@ -20,7 +20,11 @@ const weekdays = [
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ success?: string; error?: string }>;
+  searchParams: Promise<{
+    success?: string;
+    error?: string;
+    errorTarget?: string;
+  }>;
 }) {
   const [settings, messages] = await Promise.all([
     ensureSettings(),

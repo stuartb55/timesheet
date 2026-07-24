@@ -124,8 +124,9 @@ export function localDateAndMinute(
   };
 }
 
-/** Convert a Europe/London wall-clock value to an instant, including DST. */
-export function londonWallTimeToUtc(date: string, minute: number): Date {
+export type LondonTimeOccurrence = "earlier" | "later";
+
+export function londonWallTimeCandidates(date: string, minute: number): Date[] {
   if (
     !isValidIsoDate(date) ||
     !Number.isInteger(minute) ||
@@ -143,19 +144,43 @@ export function londonWallTimeToUtc(date: string, minute: number): Date {
     hour,
     min,
   );
-  let candidate = new Date(nominalUtc);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const local = localDateAndMinute(candidate);
-    const dateDelta = daysBetween(local.date, date) * MINUTES_PER_DAY;
-    const minuteDelta = minute - local.minute + dateDelta;
-    if (minuteDelta === 0) return candidate;
-    candidate = new Date(candidate.getTime() + minuteDelta * 60_000);
-  }
-  const converted = localDateAndMinute(candidate);
-  if (converted.date !== date || converted.minute !== minute) {
+  return [-120, -60, 0, 60, 120]
+    .map((offset) => new Date(nominalUtc + offset * 60_000))
+    .filter((candidate) => {
+      const local = localDateAndMinute(candidate);
+      return local.date === date && local.minute === minute;
+    })
+    .filter(
+      (candidate, index, candidates) =>
+        candidates.findIndex(
+          (other) => other.getTime() === candidate.getTime(),
+        ) === index,
+    )
+    .sort((left, right) => left.getTime() - right.getTime());
+}
+
+/** Convert a Europe/London wall-clock value to an instant, including DST. */
+export function londonWallTimeToUtc(
+  date: string,
+  minute: number,
+  occurrence: LondonTimeOccurrence = "earlier",
+): Date {
+  const candidates = londonWallTimeCandidates(date, minute);
+  if (candidates.length === 0) {
     throw new Error(
       "That local time does not exist because the clocks change on this date",
     );
   }
-  return candidate;
+  return occurrence === "later"
+    ? candidates[candidates.length - 1]
+    : candidates[0];
+}
+
+export function londonTimeOccurrence(instant: Date): LondonTimeOccurrence {
+  const local = localDateAndMinute(instant);
+  const candidates = londonWallTimeCandidates(local.date, local.minute);
+  return candidates.length > 1 &&
+    instant.getTime() === candidates[candidates.length - 1].getTime()
+    ? "later"
+    : "earlier";
 }

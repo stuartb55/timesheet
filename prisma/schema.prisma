@@ -225,7 +225,7 @@ model FlexiLeave {
 
 model ExceptionalCarryover {
   id                    String           @id @default(cuid())
-  accountingPeriodId    String
+  accountingPeriodId    String           @unique
   approvedAmountMinutes Int
   approvalDate          DateTime         @db.Date
   note                  String

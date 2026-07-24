@@ -16,15 +16,27 @@ export const dynamic = "force-dynamic";
 export default async function HistoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ success?: string; error?: string }>;
+  searchParams: Promise<{
+    success?: string;
+    error?: string;
+    errorTarget?: string;
+    page?: string;
+  }>;
 }) {
-  const [settings, messages, changes, segments, credits, leave] =
-    await Promise.all([
+  const query = await searchParams;
+  const parsedPage = Number(query.page ?? "1");
+  const page =
+    Number.isSafeInteger(parsedPage) && parsedPage > 0 && parsedPage <= 10_000
+      ? parsedPage
+      : 1;
+  const pageSize = 100;
+  const [settings, changeResults, segments, credits, leave] = await Promise.all(
+    [
       ensureSettings(),
-      searchParams,
       prisma.changeHistory.findMany({
-        orderBy: { occurredAt: "desc" },
-        take: 250,
+        orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize + 1,
       }),
       prisma.timeSegment.findMany({
         where: { deletedAt: { not: null } },
@@ -38,10 +50,17 @@ export default async function HistoryPage({
         where: { deletedAt: { not: null } },
         orderBy: { deletedAt: "desc" },
       }),
-    ]);
+    ],
+  );
+  const hasNextPage = changeResults.length > pageSize;
+  const changes = changeResults.slice(0, pageSize);
   return (
     <>
-      <FlashMessage {...messages} />
+      <FlashMessage
+        success={query.success}
+        error={query.error}
+        errorTarget={query.errorTarget}
+      />
       <h1 className="govuk-heading-xl">Change history</h1>
       <p className="govuk-body-l">
         A simple local history of important changes. This is intended for
@@ -153,9 +172,12 @@ export default async function HistoryPage({
           </table>
         </div>
       )}
-      <h2 className="govuk-heading-l">Recent changes</h2>
+      <h2 className="govuk-heading-l">Change log</h2>
       <div className="app-table-scroll">
         <table className="govuk-table">
+          <caption className="govuk-table__caption govuk-table__caption--m">
+            Page {page}
+          </caption>
           <thead className="govuk-table__head">
             <tr className="govuk-table__row">
               <th className="govuk-table__header">When</th>
@@ -204,6 +226,34 @@ export default async function HistoryPage({
           </tbody>
         </table>
       </div>
+      {(page > 1 || hasNextPage) && (
+        <nav className="govuk-pagination" aria-label="Change history pages">
+          {page > 1 && (
+            <div className="govuk-pagination__prev">
+              <Link
+                className="govuk-link govuk-pagination__link"
+                href={`/history?page=${page - 1}`}
+                rel="prev"
+              >
+                <span className="govuk-pagination__link-title">
+                  Previous page
+                </span>
+              </Link>
+            </div>
+          )}
+          {hasNextPage && (
+            <div className="govuk-pagination__next">
+              <Link
+                className="govuk-link govuk-pagination__link"
+                href={`/history?page=${page + 1}`}
+                rel="next"
+              >
+                <span className="govuk-pagination__link-title">Next page</span>
+              </Link>
+            </div>
+          )}
+        </nav>
+      )}
     </>
   );
 }

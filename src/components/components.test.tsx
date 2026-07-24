@@ -20,9 +20,19 @@ describe("accessible summary components", () => {
   });
 
   it("announces validation errors", () => {
-    render(<FlashMessage error="Finish time must be after start time" />);
+    render(
+      <FlashMessage
+        error="Finish time must be after start time"
+        errorTarget="segment-new-finish"
+      />,
+    );
     const alert = screen.getByRole("alert");
     expect(alert).toHaveClass("govuk-error-summary");
     expect(alert).toHaveTextContent("Finish time must be after start time");
+    expect(
+      screen.getByRole("link", {
+        name: "Finish time must be after start time",
+      }),
+    ).toHaveAttribute("href", "#segment-new-finish");
   });
 });

@@ -25,7 +25,12 @@ export const dynamic = "force-dynamic";
 export default async function PeriodPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; success?: string; error?: string }>;
+  searchParams: Promise<{
+    date?: string;
+    success?: string;
+    error?: string;
+    errorTarget?: string;
+  }>;
 }) {
   const query = await searchParams;
   const date = isValidIsoDate(query.date ?? "")
@@ -47,7 +52,11 @@ export default async function PeriodPage({
   ).length;
   return (
     <>
-      <FlashMessage success={query.success} error={query.error} />
+      <FlashMessage
+        success={query.success}
+        error={query.error}
+        errorTarget={query.errorTarget}
+      />
       <h1 className="govuk-heading-xl">Accounting period</h1>
       <div className="app-date-nav app-no-print">
         <Link

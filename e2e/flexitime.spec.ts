@@ -92,6 +92,36 @@ test("initial setup and record-management journeys", async ({ page }) => {
   await expect(page.getByText("Time segment saved")).toBeVisible();
 });
 
+test("validation errors link to the field and retain submitted values", async ({
+  page,
+}) => {
+  await page.goto("/day/2026-07-21");
+  const section = page
+    .locator("details")
+    .filter({ hasText: "Add a time segment" });
+  await section.locator(":scope > summary").click();
+  await section.getByLabel("Start time").fill("12:00");
+  await section.getByLabel("Finish time").fill("11:00");
+  await section.getByLabel("Note (optional)").fill("Retain this explanation");
+  await section.getByRole("button", { name: "Add time segment" }).click();
+
+  const errorLink = page.getByRole("link", {
+    name: /Finish time must be after start time/,
+  });
+  await expect(errorLink).toHaveAttribute("href", "#segment-new-finish");
+  await expect
+    .poll(() =>
+      page.evaluate(() => sessionStorage.getItem("flexitime-pending-form")),
+    )
+    .toContain("12:00");
+  await expect(section).toHaveAttribute("open", "");
+  await expect(section.getByLabel("Start time")).toHaveValue("12:00");
+  await expect(section.getByLabel("Finish time")).toHaveValue("11:00");
+  await expect(section.getByLabel("Note (optional)")).toHaveValue(
+    "Retain this explanation",
+  );
+});
+
 test("live clock journey", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Start work" }).click();
@@ -126,6 +156,13 @@ test("period completion, exceptional carryover and statement export", async ({
     .click();
   await expect(page.getByText("Exceptional carryover recorded")).toBeVisible();
   await page
+    .locator("summary")
+    .filter({ hasText: "Confirm final carryover" })
+    .click();
+  await page.getByLabel("Final carryover in minutes").fill("1400");
+  await page.getByRole("button", { name: "Confirm final carryover" }).click();
+  await expect(page.getByText("Final carryover confirmed")).toBeVisible();
+  await page
     .getByRole("link", { name: "Printable accounting-period statement" })
     .click();
   await expect(
@@ -142,6 +179,107 @@ test("period completion, exceptional carryover and statement export", async ({
 
   await page.goto("/calendar?month=2026-07");
   await expect(page.getByRole("table", { name: "July 2026" })).toBeVisible();
+});
+
+test("a balance edit invalidates confirmed carryover and the next opening balance", async ({
+  page,
+}) => {
+  await page.goto("/day/2026-07-20");
+  await page
+    .locator("summary")
+    .filter({ hasText: "Add a time segment" })
+    .click();
+  const segmentForm = page
+    .locator("details")
+    .filter({ hasText: "Add a time segment" });
+  await segmentForm.getByLabel("Start time").fill("13:00");
+  await segmentForm.getByLabel("Finish time").fill("14:00");
+  await segmentForm.getByRole("button", { name: "Add time segment" }).click();
+  await expect(page.getByText("Time segment saved")).toBeVisible();
+
+  const state = execFileSync("docker", [
+    "compose",
+    "-p",
+    "flexitime-e2e",
+    "-f",
+    "docker-compose.test.yml",
+    "exec",
+    "-T",
+    "db",
+    "psql",
+    "-U",
+    "flexitime",
+    "-d",
+    "flexitime_test",
+    "-Atc",
+    `SELECT
+       p."carryoverConfirmed",
+       coalesce(p."finalCarryoverMinutes"::text, ''),
+       next."openingBalanceMinutes"
+     FROM "AccountingPeriod" p
+     JOIN "AccountingPeriod" next
+       ON next."startDate" = p."endDate" + 1
+     WHERE DATE '2026-07-20' BETWEEN p."startDate" AND p."endDate";`,
+  ])
+    .toString()
+    .trim()
+    .split("|");
+  expect(state).toEqual(["f", "", "0"]);
+});
+
+test("concurrent period reads keep one materialised ledger row per logical entry", async ({
+  request,
+}) => {
+  const responses = await Promise.all(
+    Array.from({ length: 12 }, () => request.get("/period?date=2030-01-15")),
+  );
+  expect(responses.every((response) => response.ok())).toBe(true);
+
+  const counts = execFileSync("docker", [
+    "compose",
+    "-p",
+    "flexitime-e2e",
+    "-f",
+    "docker-compose.test.yml",
+    "exec",
+    "-T",
+    "db",
+    "psql",
+    "-U",
+    "flexitime",
+    "-d",
+    "flexitime_test",
+    "-Atc",
+    `SELECT
+       (SELECT count(*) FROM "BalanceLedgerEntry"
+        WHERE "accountingPeriodId" = p."id"
+          AND "type" = 'DAILY_WORK_BALANCE'),
+       (SELECT count(*) FROM "BalanceLedgerEntry"
+        WHERE "accountingPeriodId" = p."id"
+          AND "type" = 'OPENING_BALANCE'),
+       (SELECT coalesce(max(grouped.entries), 0)
+        FROM (
+          SELECT count(*) AS entries
+          FROM "BalanceLedgerEntry"
+          WHERE "accountingPeriodId" = p."id"
+            AND "type" IN ('OPENING_BALANCE', 'DAILY_WORK_BALANCE')
+          GROUP BY "type", "localDate"
+        ) grouped)
+     FROM "AccountingPeriod" p
+     WHERE DATE '2030-01-15' BETWEEN p."startDate" AND p."endDate";`,
+  ])
+    .toString()
+    .trim()
+    .split("|")
+    .map(Number);
+  expect(counts).toEqual([28, 1, 1]);
+});
+
+test("rejects an unrecognised Host header", async ({ request }) => {
+  const response = await request.get("/", {
+    headers: { host: "attacker.example" },
+  });
+  expect(response.status()).toBe(421);
 });
 
 test("database backup and restore preserves records", async () => {

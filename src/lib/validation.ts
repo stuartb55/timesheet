@@ -91,6 +91,8 @@ export const timeSegmentSchema = z
     date,
     startTime: time,
     endTime: time,
+    startOccurrence: z.enum(["earlier", "later"]).default("earlier"),
+    endOccurrence: z.enum(["earlier", "later"]).default("earlier"),
     type: z.enum([
       "NORMAL_WORK",
       "OFFICIAL_TRAVEL",
@@ -166,6 +168,8 @@ export const creditSchema = z
     ),
     startTime: time.optional().or(z.literal("")),
     endTime: time.optional().or(z.literal("")),
+    startOccurrence: z.enum(["earlier", "later"]).default("earlier"),
+    endOccurrence: z.enum(["earlier", "later"]).default("earlier"),
     type: z.enum([
       "ANNUAL_LEAVE",
       "SICK_ABSENCE",
@@ -209,6 +213,18 @@ export const creditSchema = z
       context.addIssue({
         code: "custom",
         message: "Enter a duration or start and finish times",
+        path: ["durationMinutes"],
+      });
+    }
+    if (
+      value.type === "SIGNIFICANT_TRANSPORT_DISRUPTION" &&
+      (value.durationMinutes ?? 0) < 30 &&
+      !(value.startTime && value.endTime)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Significant transport disruption must last at least 30 minutes",
         path: ["durationMinutes"],
       });
     }

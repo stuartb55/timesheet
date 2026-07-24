@@ -26,7 +26,11 @@ export const dynamic = "force-dynamic";
 export default async function Dashboard({
   searchParams,
 }: {
-  searchParams: Promise<{ success?: string; error?: string }>;
+  searchParams: Promise<{
+    success?: string;
+    error?: string;
+    errorTarget?: string;
+  }>;
 }) {
   const messages = await searchParams;
   const today = nowInLondon();

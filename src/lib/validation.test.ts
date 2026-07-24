@@ -66,4 +66,16 @@ describe("record validation", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("rejects transport disruption shorter than 30 minutes", () => {
+    expect(
+      creditSchema.safeParse({
+        ...baseCredit,
+        type: "SIGNIFICANT_TRANSPORT_DISRUPTION",
+        durationMinutes: "29",
+        startTime: "",
+        endTime: "",
+      }).success,
+    ).toBe(false);
+  });
 });

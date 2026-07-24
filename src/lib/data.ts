@@ -8,6 +8,7 @@ import type {
   TimeSegment,
   WorkingPatternDay,
 } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { DEFAULT_POLICIES, DEFAULT_WEEKLY_PATTERN } from "@/domain/defaults";
 import { calculatePeriod, evaluateDay } from "@/domain/flexitime";
 import { calculateWtrAverage } from "@/domain/wtr";
@@ -27,6 +28,8 @@ export type FullSettings = PersonalSettings & {
   workingPattern: { days: WorkingPatternDay[] };
   flexitimePolicy: FlexitimePolicy;
 };
+
+export type DbClient = typeof prisma | Prisma.TransactionClient;
 
 export async function ensureSettings(): Promise<FullSettings> {
   const existing = await prisma.personalSettings.findUnique({
@@ -142,27 +145,39 @@ export async function getDay(date: string, settingsArg?: FullSettings) {
   return (await getDays([date], settingsArg))[0];
 }
 
-export async function getDays(dates: string[], settingsArg?: FullSettings) {
+export async function getDayWithClient(
+  date: string,
+  settings: FullSettings,
+  client: DbClient,
+) {
+  return (await getDays([date], settings, client))[0];
+}
+
+export async function getDays(
+  dates: string[],
+  settingsArg?: FullSettings,
+  client: DbClient = prisma,
+) {
   const settings = settingsArg ?? (await ensureSettings());
   const localDates = dates.map(dateAtUtcMidnight);
   const [segments, credits, flexiLeave, completion, resolutions] =
     await Promise.all([
-      prisma.timeSegment.findMany({
+      client.timeSegment.findMany({
         where: { localDate: { in: localDates }, deletedAt: null },
         orderBy: { startAt: "asc" },
       }),
-      prisma.authorisedCredit.findMany({
+      client.authorisedCredit.findMany({
         where: { localDate: { in: localDates }, deletedAt: null },
         orderBy: { createdAt: "asc" },
       }),
-      prisma.flexiLeave.findMany({
+      client.flexiLeave.findMany({
         where: { localDate: { in: localDates }, deletedAt: null },
         orderBy: { createdAt: "asc" },
       }),
-      prisma.dailyCompletion.findMany({
+      client.dailyCompletion.findMany({
         where: { localDate: { in: localDates } },
       }),
-      prisma.findingResolution.findMany({
+      client.findingResolution.findMany({
         where: { localDate: { in: localDates } },
       }),
     ]);
@@ -232,43 +247,108 @@ export async function getDays(dates: string[], settingsArg?: FullSettings) {
 export async function ensureAccountingPeriod(
   date: string,
   settingsArg?: FullSettings,
+  client: DbClient = prisma,
 ): Promise<AccountingPeriod> {
   const settings = settingsArg ?? (await ensureSettings());
   const anchor = isoDate(settings.accountingAnchorDate);
   const bounds = periodBounds(anchor, date);
-  const found = await prisma.accountingPeriod.findUnique({
-    where: { startDate: dateAtUtcMidnight(bounds.start) },
+  const startDate = dateAtUtcMidnight(bounds.start);
+  const existing = await client.accountingPeriod.findUnique({
+    where: { startDate },
   });
-  if (found) return found;
+  if (existing) {
+    const opening = await client.balanceLedgerEntry.findFirst({
+      where: {
+        accountingPeriodId: existing.id,
+        type: "OPENING_BALANCE",
+      },
+      select: { id: true },
+    });
+    if (opening) return existing;
+  }
   const previousBounds = periodBounds(anchor, addDays(bounds.start, -1));
-  const previous = await prisma.accountingPeriod.findUnique({
+  const previous = await client.accountingPeriod.findUnique({
     where: { startDate: dateAtUtcMidnight(previousBounds.start) },
   });
   const openingBalanceMinutes = previous?.finalCarryoverMinutes ?? 0;
-  return prisma.accountingPeriod.create({
-    data: {
-      startDate: dateAtUtcMidnight(bounds.start),
-      endDate: dateAtUtcMidnight(bounds.end),
-      openingBalanceMinutes,
-      ledgerEntries: {
-        create: {
-          localDate: dateAtUtcMidnight(bounds.start),
-          type: "OPENING_BALANCE",
-          durationMinutes: openingBalanceMinutes,
-          description:
-            "Balance brought forward from the previous accounting period",
-        },
-      },
-    },
+  const endDate = dateAtUtcMidnight(bounds.end);
+  await client.$executeRaw`
+    INSERT INTO "AccountingPeriod" (
+      "id",
+      "startDate",
+      "endDate",
+      "openingBalanceMinutes",
+      "carryoverConfirmed",
+      "status",
+      "createdAt",
+      "updatedAt"
+    )
+    VALUES (
+      ${randomUUID()},
+      ${startDate},
+      ${endDate},
+      ${openingBalanceMinutes},
+      false,
+      'OPEN'::"PeriodStatus",
+      NOW(),
+      NOW()
+    )
+    ON CONFLICT ("startDate") DO NOTHING
+  `;
+  const period = await client.accountingPeriod.findUniqueOrThrow({
+    where: { startDate },
   });
+  await client.$executeRaw`
+    INSERT INTO "BalanceLedgerEntry" (
+      "id",
+      "localDate",
+      "accountingPeriodId",
+      "type",
+      "durationMinutes",
+      "description",
+      "provisional",
+      "createdAt"
+    )
+    VALUES (
+      ${randomUUID()},
+      ${startDate},
+      ${period.id},
+      'OPENING_BALANCE'::"LedgerEntryType",
+      ${period.openingBalanceMinutes},
+      'Balance brought forward from the previous accounting period',
+      false,
+      NOW()
+    )
+    ON CONFLICT ("accountingPeriodId")
+      WHERE "type" = 'OPENING_BALANCE'
+      DO NOTHING
+  `;
+  return period;
 }
 
-export async function assertDateIsEditable(date: string): Promise<void> {
-  const period = await ensureAccountingPeriod(date);
+export async function lockAccountingPeriod(
+  transaction: Prisma.TransactionClient,
+  periodId: string,
+): Promise<void> {
+  await transaction.$queryRaw`
+    SELECT "id"
+    FROM "AccountingPeriod"
+    WHERE "id" = ${periodId}
+    FOR UPDATE
+  `;
+}
+
+export async function assertDateIsEditable(
+  date: string,
+  settingsArg?: FullSettings,
+  client: DbClient = prisma,
+): Promise<AccountingPeriod> {
+  const period = await ensureAccountingPeriod(date, settingsArg, client);
   if (period.status === "LOCKED")
     throw new Error(
       "This accounting period is locked. Unlock it before editing records.",
     );
+  return period;
 }
 
 export async function getOpenTimeSegment(): Promise<TimeSegment | null> {
@@ -277,66 +357,76 @@ export async function getOpenTimeSegment(): Promise<TimeSegment | null> {
   });
 }
 
-export async function rebuildDayLedger(date: string): Promise<void> {
-  const settings = await ensureSettings();
-  const period = await ensureAccountingPeriod(date, settings);
-  const day = await getDay(date, settings);
+export async function rebuildDayLedger(
+  date: string,
+  transaction: Prisma.TransactionClient,
+  settings: FullSettings,
+  period: AccountingPeriod,
+): Promise<void> {
+  const day = await getDayWithClient(date, settings, transaction);
   const localDate = dateAtUtcMidnight(date);
-  await prisma.$transaction(async (transaction) => {
-    await transaction.balanceLedgerEntry.deleteMany({
-      where: {
-        localDate,
-        type: {
-          in: ["DAILY_WORK_BALANCE", "AUTHORISED_CREDIT", "FLEXI_LEAVE"],
-        },
+  await transaction.balanceLedgerEntry.deleteMany({
+    where: {
+      localDate,
+      type: {
+        in: ["DAILY_WORK_BALANCE", "AUTHORISED_CREDIT", "FLEXI_LEAVE"],
       },
-    });
+    },
+  });
+  await transaction.balanceLedgerEntry.create({
+    data: {
+      localDate,
+      accountingPeriodId: period.id,
+      type: "DAILY_WORK_BALANCE",
+      durationMinutes:
+        day.calculation.confirmedEligibleMinutes -
+        day.calculation.confirmedCreditMinutes -
+        day.calculation.expectedMinutes,
+      description: "Eligible actual work less expected time",
+      provisional: date > nowInLondon().date,
+    },
+  });
+  for (const credit of day.credits) {
+    if (credit.approvalStatus === "REFUSED") continue;
+    if (
+      credit.type === "SIGNIFICANT_TRANSPORT_DISRUPTION" &&
+      credit.durationMinutes < 30
+    ) {
+      continue;
+    }
     await transaction.balanceLedgerEntry.create({
       data: {
         localDate,
         accountingPeriodId: period.id,
-        type: "DAILY_WORK_BALANCE",
-        durationMinutes:
-          day.calculation.confirmedEligibleMinutes -
-          day.calculation.confirmedCreditMinutes -
-          day.calculation.expectedMinutes,
-        description: "Eligible actual work less expected time",
-        provisional: date > nowInLondon().date,
+        type: "AUTHORISED_CREDIT",
+        durationMinutes: credit.durationMinutes,
+        sourceType: "AuthorisedCredit",
+        sourceId: credit.id,
+        description: `Authorised credit: ${credit.type.toLowerCase().replaceAll("_", " ")}`,
+        provisional:
+          credit.approvalStatus === "PENDING" || date > nowInLondon().date,
       },
     });
-    for (const credit of day.credits) {
-      if (credit.approvalStatus === "REFUSED") continue;
-      await transaction.balanceLedgerEntry.create({
-        data: {
-          localDate,
-          accountingPeriodId: period.id,
-          type: "AUTHORISED_CREDIT",
-          durationMinutes: credit.durationMinutes,
-          sourceType: "AuthorisedCredit",
-          sourceId: credit.id,
-          description: `Authorised credit: ${credit.type.toLowerCase().replaceAll("_", " ")}`,
-          provisional: credit.approvalStatus === "PENDING",
-        },
-      });
-    }
-    for (const item of day.flexiLeave) {
-      await transaction.balanceLedgerEntry.create({
-        data: {
-          localDate,
-          accountingPeriodId: period.id,
-          type: "FLEXI_LEAVE",
-          durationMinutes: 0,
-          sourceType: "FlexiLeave",
-          sourceId: item.id,
-          description: `Flexi leave recorded (${item.durationMinutes} minutes); impact is included through expected time`,
-          provisional: item.approvalStatus !== "APPROVED",
-        },
-      });
-    }
-  });
+  }
+  for (const item of day.flexiLeave) {
+    await transaction.balanceLedgerEntry.create({
+      data: {
+        localDate,
+        accountingPeriodId: period.id,
+        type: "FLEXI_LEAVE",
+        durationMinutes: 0,
+        sourceType: "FlexiLeave",
+        sourceId: item.id,
+        description: `Flexi leave recorded (${item.durationMinutes} minutes); impact is included through expected time`,
+        provisional:
+          item.approvalStatus !== "APPROVED" || date > nowInLondon().date,
+      },
+    });
+  }
 }
 
 async function rebuildPeriodLedger(
+  transaction: Prisma.TransactionClient,
   period: AccountingPeriod,
   days: Array<Awaited<ReturnType<typeof getDay>>>,
 ) {
@@ -356,6 +446,12 @@ async function rebuildPeriodLedger(
     });
     for (const credit of day.credits) {
       if (credit.approvalStatus === "REFUSED") continue;
+      if (
+        credit.type === "SIGNIFICANT_TRANSPORT_DISRUPTION" &&
+        credit.durationMinutes < 30
+      ) {
+        continue;
+      }
       generated.push({
         localDate: credit.localDate,
         accountingPeriodId: period.id,
@@ -382,31 +478,31 @@ async function rebuildPeriodLedger(
       });
     }
   }
-  await prisma.$transaction(async (transaction) => {
-    await transaction.balanceLedgerEntry.deleteMany({
-      where: {
-        accountingPeriodId: period.id,
-        type: {
-          in: ["DAILY_WORK_BALANCE", "AUTHORISED_CREDIT", "FLEXI_LEAVE"],
-        },
+  await transaction.balanceLedgerEntry.deleteMany({
+    where: {
+      accountingPeriodId: period.id,
+      type: {
+        in: ["DAILY_WORK_BALANCE", "AUTHORISED_CREDIT", "FLEXI_LEAVE"],
       },
-    });
-    if (generated.length)
-      await transaction.balanceLedgerEntry.createMany({ data: generated });
+    },
   });
+  if (generated.length)
+    await transaction.balanceLedgerEntry.createMany({ data: generated });
 }
 
-export async function getPeriod(date: string, settingsArg?: FullSettings) {
-  const settings = settingsArg ?? (await ensureSettings());
-  const period = await ensureAccountingPeriod(date, settings);
+export async function getPeriodWithTransaction(
+  date: string,
+  settings: FullSettings,
+  transaction: Prisma.TransactionClient,
+  period: AccountingPeriod,
+) {
   const start = isoDate(period.startDate);
   const end = isoDate(period.endDate);
   const dayDates = Array.from({ length: 28 }, (_, index) =>
     addDays(start, index),
   );
-  const days = await getDays(dayDates, settings);
-  await rebuildPeriodLedger(period, days);
-  const exceptional = await prisma.exceptionalCarryover.findFirst({
+  const days = await getDays(dayDates, settings, transaction);
+  const exceptional = await transaction.exceptionalCarryover.findFirst({
     where: { accountingPeriodId: period.id },
   });
   const previousDate = addDays(start, -1);
@@ -414,11 +510,11 @@ export async function getPeriod(date: string, settingsArg?: FullSettings) {
     isoDate(settings.accountingAnchorDate),
     previousDate,
   );
-  const previousPeriod = await prisma.accountingPeriod.findUnique({
+  const previousPeriod = await transaction.accountingPeriod.findUnique({
     where: { startDate: dateAtUtcMidnight(previousBounds.start) },
     include: { exceptionalCarryovers: true },
   });
-  const ledger = await prisma.balanceLedgerEntry.findMany({
+  const ledger = await transaction.balanceLedgerEntry.findMany({
     where: { accountingPeriodId: period.id },
     orderBy: [{ localDate: "asc" }, { createdAt: "asc" }],
   });
@@ -439,6 +535,58 @@ export async function getPeriod(date: string, settingsArg?: FullSettings) {
     date: end,
   });
   return { settings, period, days, calculation, exceptional, ledger };
+}
+
+export async function getPeriod(date: string, settingsArg?: FullSettings) {
+  const settings = settingsArg ?? (await ensureSettings());
+  const period = await ensureAccountingPeriod(date, settings);
+  const materialisedDays = await prisma.balanceLedgerEntry.count({
+    where: {
+      accountingPeriodId: period.id,
+      type: "DAILY_WORK_BALANCE",
+    },
+  });
+  if (materialisedDays !== 28) {
+    await prisma.$transaction(
+      async (transaction) => {
+        await lockAccountingPeriod(transaction, period.id);
+        const currentCount = await transaction.balanceLedgerEntry.count({
+          where: {
+            accountingPeriodId: period.id,
+            type: "DAILY_WORK_BALANCE",
+          },
+        });
+        if (currentCount === 28) return;
+        const currentPeriod =
+          await transaction.accountingPeriod.findUniqueOrThrow({
+            where: { id: period.id },
+          });
+        const start = isoDate(currentPeriod.startDate);
+        const days = await getDays(
+          Array.from({ length: 28 }, (_, index) => addDays(start, index)),
+          settings,
+          transaction,
+        );
+        await rebuildPeriodLedger(transaction, currentPeriod, days);
+      },
+      { isolationLevel: "ReadCommitted" },
+    );
+  }
+  return prisma.$transaction(
+    async (transaction) => {
+      const currentPeriod =
+        (await transaction.accountingPeriod.findUnique({
+          where: { id: period.id },
+        })) ?? period;
+      return getPeriodWithTransaction(
+        date,
+        settings,
+        transaction,
+        currentPeriod,
+      );
+    },
+    { isolationLevel: "RepeatableRead" },
+  );
 }
 
 export async function getWtr(asOfDate: string, settingsArg?: FullSettings) {

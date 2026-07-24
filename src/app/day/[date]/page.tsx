@@ -29,7 +29,11 @@ export default async function DayPage({
   searchParams,
 }: {
   params: Promise<{ date: string }>;
-  searchParams: Promise<{ success?: string; error?: string }>;
+  searchParams: Promise<{
+    success?: string;
+    error?: string;
+    errorTarget?: string;
+  }>;
 }) {
   const { date } = await params;
   if (!isValidIsoDate(date)) notFound();
@@ -487,7 +491,11 @@ export default async function DayPage({
           </h2>
           <form action={toggleDayComplete}>
             <input type="hidden" name="date" value={date} />
-            <button className="govuk-button" data-module="govuk-button">
+            <button
+              className="govuk-button"
+              data-module="govuk-button"
+              id="toggle-completion"
+            >
               {day.completion ? "Mark day incomplete" : "Mark day complete"}
             </button>
           </form>

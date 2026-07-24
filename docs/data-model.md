@@ -14,9 +14,19 @@
 
 ## Period, ledger and history
 
-`AccountingPeriod` stores unique start/end dates, opening and final carryover, confirmation, lifecycle state, check/lock timestamps and unlock reason. `ExceptionalCarryover` belongs to one period and requires an amount, date and non-empty note.
+`AccountingPeriod` stores unique start/end dates, opening and final carryover,
+confirmation, lifecycle state, check/lock timestamps and unlock reason.
+`ExceptionalCarryover` belongs uniquely to one period and requires an amount,
+date and non-empty note.
 
-`BalanceLedgerEntry` belongs to a period and contains date, type, signed minutes, optional source record, description, provisional flag and reason. An opening entry, work-minus-expectation entry and source-linked credit/leave entries make the displayed result explainable. Manual correction rows have a database-enforced non-empty reason. Confirmed source calculations plus manual corrections reproduce raw balance; provisional rows are displayed but excluded.
+`BalanceLedgerEntry` belongs to a period and contains date, type, signed minutes,
+optional source record, description, provisional flag and reason. Database
+uniqueness constraints allow one opening entry per period, one generated daily
+entry per period/date and one generated entry per source. An opening entry,
+work-minus-expectation entry and source-linked credit/leave entries make the
+displayed result explainable. Manual correction rows have a database-enforced
+non-empty reason. Confirmed source calculations plus manual corrections
+reproduce raw balance; provisional rows are displayed but excluded.
 
 `ChangeHistory` stores timestamp, record type/id, action, before/after JSON and an optional or required workflow reason. Soft-deleted time, credit and flexi-leave rows can be restored from the history page.
 

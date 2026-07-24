@@ -7,7 +7,11 @@ import {
   saveFlexiLeave,
   saveTimeSegment,
 } from "@/app/actions";
-import { formatTime, localDateAndMinute } from "@/domain/time";
+import {
+  formatTime,
+  localDateAndMinute,
+  londonTimeOccurrence,
+} from "@/domain/time";
 import { CREDIT_LABELS, SEGMENT_LABELS } from "@/lib/constants";
 
 const approvalOptions = [
@@ -16,6 +20,65 @@ const approvalOptions = [
   ["APPROVED", "External approval obtained"],
   ["REFUSED", "External approval refused"],
 ] as const;
+
+function ClockChangeFields({
+  prefix,
+  startAt,
+  endAt,
+}: {
+  prefix: string;
+  startAt?: Date | null;
+  endAt?: Date | null;
+}) {
+  return (
+    <details className="govuk-details">
+      <summary className="govuk-details__summary">
+        <span className="govuk-details__summary-text">
+          Clock-change options
+        </span>
+      </summary>
+      <div className="govuk-details__text">
+        <p className="govuk-body">
+          When the clocks go back, times between 01:00 and 01:59 happen twice.
+          Choose which occurrence you mean.
+        </p>
+        <div className="app-grid">
+          <div className="govuk-form-group">
+            <label
+              className="govuk-label"
+              htmlFor={`${prefix}-start-occurrence`}
+            >
+              Repeated-hour start
+            </label>
+            <select
+              className="govuk-select"
+              id={`${prefix}-start-occurrence`}
+              name="startOccurrence"
+              defaultValue={startAt ? londonTimeOccurrence(startAt) : "earlier"}
+            >
+              <option value="earlier">First occurrence</option>
+              <option value="later">Second occurrence</option>
+            </select>
+          </div>
+          <div className="govuk-form-group">
+            <label className="govuk-label" htmlFor={`${prefix}-end-occurrence`}>
+              Repeated-hour finish
+            </label>
+            <select
+              className="govuk-select"
+              id={`${prefix}-end-occurrence`}
+              name="endOccurrence"
+              defaultValue={endAt ? londonTimeOccurrence(endAt) : "earlier"}
+            >
+              <option value="earlier">First occurrence</option>
+              <option value="later">Second occurrence</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </details>
+  );
+}
 
 function ApprovalFields({
   prefix,
@@ -141,6 +204,11 @@ export function TimeSegmentForm({
             </select>
           </div>
         </div>
+        <ClockChangeFields
+          prefix={prefix}
+          startAt={segment?.startAt}
+          endAt={segment?.endAt}
+        />
         <div className="govuk-form-group">
           <label className="govuk-label" htmlFor={`${prefix}-note`}>
             Note (optional)
@@ -335,6 +403,11 @@ export function CreditForm({
             />
           </div>
         </div>
+        <ClockChangeFields
+          prefix={prefix}
+          startAt={credit?.startAt}
+          endAt={credit?.endAt}
+        />
         <div className="govuk-form-group">
           <label className="govuk-label" htmlFor={`${prefix}-note`}>
             Note

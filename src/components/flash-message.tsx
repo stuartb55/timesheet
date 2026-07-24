@@ -1,12 +1,15 @@
 export function FlashMessage({
   success,
   error,
+  errorTarget,
 }: {
   success?: string | string[];
   error?: string | string[];
+  errorTarget?: string | string[];
 }) {
   const successMessage = Array.isArray(success) ? success[0] : success;
   const errorMessage = Array.isArray(error) ? error[0] : error;
+  const target = Array.isArray(errorTarget) ? errorTarget[0] : errorTarget;
   if (errorMessage) {
     return (
       <div
@@ -21,7 +24,9 @@ export function FlashMessage({
         </h2>
         <div className="govuk-error-summary__body">
           <ul className="govuk-list govuk-error-summary__list">
-            <li>{errorMessage}</li>
+            <li>
+              <a href={`#${target || "main-content"}`}>{errorMessage}</a>
+            </li>
           </ul>
         </div>
       </div>

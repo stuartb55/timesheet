@@ -276,6 +276,7 @@ describe("daily flexitime calculation and policy evaluation", () => {
       ],
     });
     expect(result.confirmedBalanceChange).toBe(-24);
+    expect(result.provisionalBalanceChange).toBe(-24);
   });
 
   it("18. shows a 30-minute travel disruption request provisionally", () => {
@@ -394,6 +395,45 @@ describe("daily flexitime calculation and policy evaluation", () => {
     );
   });
 
+  it("caps split rota boot-up segments across the whole day", () => {
+    const result = day({
+      policy: { ...DEFAULT_POLICIES.SERVICE_SUPPORT, rotaMode: true },
+      segments: [
+        ...normalSegments(),
+        segment(500, 505, "ROTA_BOOT_UP", {
+          approvalStatus: "APPROVED",
+          scheduledStartMinute: 505,
+        }),
+        segment(505, 510, "ROTA_BOOT_UP", {
+          approvalStatus: "APPROVED",
+          scheduledStartMinute: 510,
+        }),
+      ],
+    });
+    expect(result.confirmedEligibleMinutes).toBe(449);
+    expect(result.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ruleId: "BOOT_UP_LIMIT_EXCEEDED" }),
+      ]),
+    );
+  });
+
+  it("does not treat valid boot-up time as the bandwidth start", () => {
+    const result = day({
+      policy: { ...DEFAULT_POLICIES.SERVICE_SUPPORT, rotaMode: true },
+      segments: [
+        ...normalSegments(),
+        segment(505, 510, "ROTA_BOOT_UP", {
+          approvalStatus: "APPROVED",
+          scheduledStartMinute: 510,
+        }),
+      ],
+    });
+    expect(
+      result.findings.some((item) => item.ruleId === "OUTSIDE_START_BANDWIDTH"),
+    ).toBe(false);
+  });
+
   it("39. identifies overlapping time entries", () => {
     const result = day({ segments: [segment(510, 750), segment(700, 900)] });
     expect(result.findings).toEqual(
@@ -494,11 +534,46 @@ describe("daily flexitime calculation and policy evaluation", () => {
     );
   });
 
+  it("combines separate approved absences to cover a whole day", () => {
+    const result = day({
+      segments: [],
+      isComplete: true,
+      credits: [
+        {
+          date,
+          durationMinutes: 222,
+          type: "ANNUAL_LEAVE",
+          approvalStatus: "APPROVED",
+        },
+        {
+          date,
+          durationMinutes: 222,
+          type: "OTHER_AUTHORISED_ABSENCE",
+          approvalStatus: "APPROVED",
+        },
+      ],
+    });
+    expect(
+      result.findings.some(
+        (item) =>
+          item.ruleId === "INCOMPLETE_TIME_RECORD" &&
+          item.severity === "BREACH",
+      ),
+    ).toBe(false);
+  });
+
   it("rejects invalid calendar dates and non-existent London wall times", () => {
     expect(isValidIsoDate("2026-02-31")).toBe(false);
     expect(() => londonWallTimeToUtc("2026-03-29", 90)).toThrow(
       /clocks change/,
     );
+  });
+
+  it("represents both occurrences of a repeated autumn wall time", () => {
+    const earlier = londonWallTimeToUtc("2026-10-25", 90, "earlier");
+    const later = londonWallTimeToUtc("2026-10-25", 90, "later");
+    expect(earlier.toISOString()).toBe("2026-10-25T00:30:00.000Z");
+    expect(later.toISOString()).toBe("2026-10-25T01:30:00.000Z");
   });
 
   it("includes elapsed live work and break time in current estimates", () => {
@@ -584,6 +659,10 @@ describe("accounting period and carryover", () => {
     expect(
       period(1400, { exceptionalCarryoverMinutes: 1400 }).finalCarryoverMinutes,
     ).toBe(1400));
+  it("allows an explicitly approved zero exceptional carryover", () =>
+    expect(
+      period(1400, { exceptionalCarryoverMinutes: 0 }).finalCarryoverMinutes,
+    ).toBe(0));
   it("31. warns for successive exceptional carryover", () =>
     expect(
       period(1400, {

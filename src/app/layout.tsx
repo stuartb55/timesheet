@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import "govuk-frontend/dist/govuk/index.scss";
+import { FormValueRecovery } from "@/components/form-value-recovery";
 import { GovukInit } from "@/components/govuk-init";
 import { ServiceNavigation } from "@/components/service-navigation";
 import "./globals.css";
@@ -21,6 +22,9 @@ export default function RootLayout({
       <body className="govuk-template__body">
         <Suspense fallback={null}>
           <GovukInit />
+        </Suspense>
+        <Suspense fallback={null}>
+          <FormValueRecovery />
         </Suspense>
         <a
           className="govuk-skip-link"

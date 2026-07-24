@@ -29,10 +29,7 @@ function approved(status: DomainSegment["approvalStatus"]): boolean {
   return !status || status === "NOT_REQUIRED" || status === "APPROVED";
 }
 
-function eligibleBootUpDuration(
-  segment: DomainSegment,
-  input: DayInput,
-): number {
+function validBootUpDuration(segment: DomainSegment, input: DayInput): number {
   if (
     segment.type !== "ROTA_BOOT_UP" ||
     segment.endMinute === null ||
@@ -43,7 +40,7 @@ function eligibleBootUpDuration(
     return 0;
   }
   if (segment.endMinute !== segment.scheduledStartMinute) return 0;
-  return Math.min(duration(segment), input.policy.bootUpAllowanceMinutes);
+  return duration(segment);
 }
 
 function segmentCoversCore(segment: DomainSegment, input: DayInput): boolean {
@@ -56,7 +53,17 @@ function segmentCoversCore(segment: DomainSegment, input: DayInput): boolean {
       approved(segment.approvalStatus)
     );
   }
-  return eligibleBootUpDuration(segment, input) > 0;
+  return validBootUpDuration(segment, input) > 0;
+}
+
+function eligibleCreditDuration(credit: DomainCredit): number {
+  if (
+    credit.type === "SIGNIFICANT_TRANSPORT_DISRUPTION" &&
+    credit.durationMinutes < 30
+  ) {
+    return 0;
+  }
+  return credit.durationMinutes;
 }
 
 function finding(
@@ -216,22 +223,21 @@ export function evaluateDay(input: DayInput): DayCalculation {
     );
   }
 
-  const wholeDayApprovedCredit = credits.some(
-    (credit) =>
-      approved(credit.approvalStatus) &&
-      credit.durationMinutes >= input.expectedMinutes,
-  );
-  const wholeDayApprovedFlexiLeave = leave.some(
-    (item) =>
-      item.approvalStatus === "APPROVED" &&
-      item.durationMinutes >= input.expectedMinutes,
-  );
+  const approvedAbsenceMinutes =
+    credits
+      .filter((credit) => approved(credit.approvalStatus))
+      .reduce((sum, credit) => sum + eligibleCreditDuration(credit), 0) +
+    leave
+      .filter((item) => item.approvalStatus === "APPROVED")
+      .reduce((sum, item) => sum + item.durationMinutes, 0);
+  const wholeDayApprovedAbsence =
+    input.expectedMinutes > 0 &&
+    approvedAbsenceMinutes >= input.expectedMinutes;
   if (
     input.isComplete &&
     input.expectedMinutes > 0 &&
     closedWork.length === 0 &&
-    !wholeDayApprovedCredit &&
-    !wholeDayApprovedFlexiLeave
+    !wholeDayApprovedAbsence
   ) {
     findings.push(
       finding(
@@ -243,12 +249,15 @@ export function evaluateDay(input: DayInput): DayCalculation {
     );
   }
 
-  if (closedWork.length > 0) {
+  const bandwidthWork = closedWork.filter(
+    (segment) => segment.type !== "ROTA_BOOT_UP",
+  );
+  if (bandwidthWork.length > 0) {
     const firstStart = Math.min(
-      ...closedWork.map((segment) => segment.startMinute),
+      ...bandwidthWork.map((segment) => segment.startMinute),
     );
     const lastFinish = Math.max(
-      ...closedWork.map((segment) => segment.endMinute as number),
+      ...bandwidthWork.map((segment) => segment.endMinute as number),
     );
     if (firstStart < input.policy.startBandwidthMinutes) {
       findings.push(
@@ -298,8 +307,7 @@ export function evaluateDay(input: DayInput): DayCalculation {
     }
 
     if (
-      !wholeDayApprovedCredit &&
-      !wholeDayApprovedFlexiLeave &&
+      !wholeDayApprovedAbsence &&
       !hasCoverage(
         segments,
         credits,
@@ -331,8 +339,7 @@ export function evaluateDay(input: DayInput): DayCalculation {
       );
     }
     if (
-      !wholeDayApprovedCredit &&
-      !wholeDayApprovedFlexiLeave &&
+      !wholeDayApprovedAbsence &&
       !hasCoverage(
         segments,
         credits,
@@ -433,13 +440,17 @@ export function evaluateDay(input: DayInput): DayCalculation {
   const bootUpMinutes = segments
     .filter((segment) => segment.type === "ROTA_BOOT_UP")
     .reduce((sum, segment) => sum + duration(segment), 0);
-  const invalidBootUpMinutes = segments
+  const validBootUpMinutes = segments
     .filter((segment) => segment.type === "ROTA_BOOT_UP")
-    .reduce(
-      (sum, segment) =>
-        sum + duration(segment) - eligibleBootUpDuration(segment, input),
-      0,
-    );
+    .reduce((sum, segment) => sum + validBootUpDuration(segment, input), 0);
+  const eligibleBootUpMinutes = Math.min(
+    validBootUpMinutes,
+    input.policy.bootUpAllowanceMinutes,
+  );
+  const invalidBootUpMinutes = Math.max(
+    0,
+    bootUpMinutes - eligibleBootUpMinutes,
+  );
   if (invalidBootUpMinutes > 0) {
     findings.push(
       finding(
@@ -495,10 +506,6 @@ export function evaluateDay(input: DayInput): DayCalculation {
   const overtimeMinutes = segments
     .filter((segment) => segment.type === "OVERTIME")
     .reduce((sum, segment) => sum + currentDuration(segment), 0);
-  const eligibleBootUpMinutes = segments.reduce(
-    (sum, segment) => sum + eligibleBootUpDuration(segment, input),
-    0,
-  );
   const breakMinutes = segments
     .filter((segment) => BREAK_TYPES.has(segment.type))
     .reduce((sum, segment) => sum + currentDuration(segment), 0);
@@ -508,10 +515,10 @@ export function evaluateDay(input: DayInput): DayCalculation {
         credit.approvalStatus === "APPROVED" ||
         credit.approvalStatus === "NOT_REQUIRED",
     )
-    .reduce((sum, credit) => sum + credit.durationMinutes, 0);
+    .reduce((sum, credit) => sum + eligibleCreditDuration(credit), 0);
   const provisionalCreditMinutes = credits
     .filter((credit) => credit.approvalStatus === "PENDING")
-    .reduce((sum, credit) => sum + credit.durationMinutes, 0);
+    .reduce((sum, credit) => sum + eligibleCreditDuration(credit), 0);
   const flexiLeaveMinutes = leave
     .filter(
       (item) =>
@@ -586,9 +593,9 @@ export function calculatePeriod(args: {
     -debitLimitMinutes,
     Math.min(creditLimitMinutes, rawClosingBalanceMinutes),
   );
-  const exceptional = args.exceptionalCarryoverMinutes ?? 0;
+  const exceptional = args.exceptionalCarryoverMinutes;
   const finalCarryoverMinutes =
-    exceptional === 0 ? proposedCarryoverMinutes : exceptional;
+    exceptional === undefined ? proposedCarryoverMinutes : exceptional;
   const findings: PolicyFinding[] = [];
   if (excessCreditMinutes > 0) {
     findings.push({
@@ -612,7 +619,7 @@ export function calculatePeriod(args: {
       affected: { durationMinutes: excessDebitMinutes },
     });
   }
-  if (exceptional !== 0 && args.previousPeriodHadExceptionalCarryover) {
+  if (exceptional !== undefined && args.previousPeriodHadExceptionalCarryover) {
     findings.push({
       ruleId: "SUCCESSIVE_EXCEPTIONAL_CARRYOVER",
       date: args.date,

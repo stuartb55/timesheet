@@ -4,7 +4,12 @@ import {
   dateAtUtcMidnight,
   londonWallTimeToUtc,
 } from "../src/domain/time";
-import { ensureSettings, nowInLondon, rebuildDayLedger } from "../src/lib/data";
+import {
+  ensureAccountingPeriod,
+  ensureSettings,
+  nowInLondon,
+  rebuildDayLedger,
+} from "../src/lib/data";
 
 async function main() {
   const alreadySeeded = await prisma.applicationSetting.findUnique({
@@ -86,7 +91,12 @@ async function main() {
   await prisma.applicationSetting.create({
     data: { key: "exampleSeedLoaded", value: true },
   });
-  for (const date of recordedDates) await rebuildDayLedger(date);
+  await prisma.$transaction(async (transaction) => {
+    for (const date of recordedDates) {
+      const period = await ensureAccountingPeriod(date, settings, transaction);
+      await rebuildDayLedger(date, transaction, settings, period);
+    }
+  });
   console.log(`Loaded optional example data beginning ${monday}.`);
 }
 

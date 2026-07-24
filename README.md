@@ -59,11 +59,17 @@ Backups live in the repository’s `backups/` directory, outside the Docker data
 scripts/backup-database.sh
 ```
 
+The backup directory is restricted to the current user and completed dump files
+are written with mode `0600`. A failed dump leaves no completed backup file.
+
 Restore one only after checking the filename. Restore replaces database objects and requires an explicit confirmation flag:
 
 ```sh
 scripts/restore-database.sh backups/flexitime-YYYYMMDDTHHMMSSZ.dump --confirm-replace
 ```
+
+Restore validates the archive first, pauses the web service when it is running,
+and applies the replacement in one database transaction.
 
 Also make periodic copies of `backups/` to an encrypted external or Time Machine backup. A useful routine is a database dump before application updates and a full JSON export at the end of each accounting period.
 
@@ -76,7 +82,11 @@ docker compose exec web npm run data:export
 docker compose exec web npm run data:import -- backups/flexitime-export.json --confirm-replace
 ```
 
-Because `backups/` is mounted into the web container, files remain on the Mac. JSON import validates the format and then replaces all application data inside one transaction. A validation or database error rolls the transaction back.
+Because `backups/` is mounted into the web container, files remain on the Mac.
+JSON export is taken from one consistent database snapshot. Import validates
+every table, relationship and ledger invariant before replacing application
+data inside one transaction. A validation or database error rolls the
+transaction back.
 
 ## Reset the application
 
